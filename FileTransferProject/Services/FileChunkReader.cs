@@ -1,10 +1,8 @@
 ﻿using FileTransferProject.Interfaces;
 using FileTransferProject.Models;
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Buffers;
+using System.IO;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
@@ -34,32 +32,34 @@ namespace FileTransferProject.Services
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                byte[] buffer = new byte[BlockSize];
-                int bytesRead = await fs.ReadAsync(buffer, cancellationToken);
+                byte[] buffer = ArrayPool<byte>.Shared.Rent(BlockSize);
+                int bytesRead = 0;
 
-                if (bytesRead == 0)
-                    break;
-
-                if (bytesRead < BlockSize)
+                try
                 {
-                    Array.Resize(ref buffer, bytesRead);
+                    bytesRead = await fs.ReadAsync(buffer, 0, BlockSize, cancellationToken);
+                    if (bytesRead == 0)
+                        break;
+
+                    string md5 = _hasher.ComputeMd5(buffer.AsSpan(0, bytesRead).ToArray());
+
+                    var chunk = new FileChunk
+                    {
+                        Position = fs.Position - bytesRead,
+                        Data = buffer[..bytesRead],
+                        Length = bytesRead,
+                        Md5Hash = md5
+                    };
+
+                    await writer.WriteAsync(chunk, cancellationToken);
                 }
-
-                string md5 = _hasher.ComputeMd5(buffer);
-
-                var chunk = new FileChunk
+                finally
                 {
-                    Position = fs.Position - bytesRead,
-                    Data = buffer,
-                    Length = bytesRead,
-                    Md5Hash = md5
-                };
-
-                await writer.WriteAsync(chunk, cancellationToken);
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
             }
 
             writer.Complete();
         }
     }
-
 }

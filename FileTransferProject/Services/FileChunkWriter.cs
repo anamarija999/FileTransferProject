@@ -1,9 +1,10 @@
 ﻿using FileTransferProject.Interfaces;
 using FileTransferProject.Models;
 using System;
-using System.Collections.Concurrent;
+using System.Buffers;
 using System.IO;
 using System.Threading.Channels;
+using System.Threading.Tasks;
 
 namespace FileTransferApp.Services
 {
@@ -19,6 +20,7 @@ namespace FileTransferApp.Services
         public async Task WriteChunks(string filePath, ChannelReader<FileChunk> reader)
         {
             await using var fs = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1024 * 1024, useAsync: true);
+
             await foreach (var chunk in reader.ReadAllAsync())
             {
                 bool verified = false;
@@ -30,20 +32,27 @@ namespace FileTransferApp.Services
                     await fs.WriteAsync(chunk.Data, 0, chunk.Length);
                     await fs.FlushAsync();
 
-                    byte[] readBack = new byte[chunk.Length];
-                    fs.Seek(chunk.Position, SeekOrigin.Begin);
-                    await fs.ReadAsync(readBack, 0, chunk.Length);
-
-                    string checkHash = _hasher.ComputeMd5(readBack);
-
-                    if (checkHash == chunk.Md5Hash)
+                    byte[] readBack = ArrayPool<byte>.Shared.Rent(chunk.Length);
+                    try
                     {
-                        Console.WriteLine($"Verified: position={chunk.Position}, hash={checkHash}");
-                        verified = true;
+                        fs.Seek(chunk.Position, SeekOrigin.Begin);
+                        await fs.ReadAsync(readBack, 0, chunk.Length);
+
+                        string checkHash = _hasher.ComputeMd5(readBack.AsSpan(0, chunk.Length).ToArray());
+
+                        if (checkHash == chunk.Md5Hash)
+                        {
+                            Console.WriteLine($"Verified: position={chunk.Position}, hash={checkHash}");
+                            verified = true;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Retry: position={chunk.Position}, attempt {++attempt}");
+                        }
                     }
-                    else
+                    finally
                     {
-                        Console.WriteLine($"Retry: position={chunk.Position}, attempt {++attempt}");
+                        ArrayPool<byte>.Shared.Return(readBack);
                     }
                 }
 
@@ -55,5 +64,3 @@ namespace FileTransferApp.Services
         }
     }
 }
-
-

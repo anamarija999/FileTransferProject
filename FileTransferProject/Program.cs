@@ -3,6 +3,7 @@ using FileTransferProject.Interfaces;
 using FileTransferProject.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace FileTransferApp
 {
@@ -11,35 +12,42 @@ namespace FileTransferApp
         static async Task Main(string[] args)
         {
             using IHost host = Host.CreateDefaultBuilder(args)
-                .ConfigureServices((_, services) =>
+                .ConfigureServices((context, services) =>
                 {
+                    // Add logging services
+                    services.AddLogging(configure => configure.AddConsole());
+
+                    // Register services with logging dependency injection
                     services.AddSingleton<IFileChunkReader, FileChunkReader>();
                     services.AddSingleton<IFileChunkWriter, FileChunkWriter>();
                     services.AddSingleton<IChunkHasher, ChunkHasher>();
                     services.AddSingleton<IFileHasher, FileHasher>();
                     services.AddSingleton<ITransferManager, TransferManager>();
+                    services.AddSingleton<UserInputService>();
                 })
                 .Build();
 
             var transferManager = host.Services.GetRequiredService<ITransferManager>();
+            var userInputService = host.Services.GetRequiredService<UserInputService>();
+            var logger = host.Services.GetRequiredService<ILogger<Program>>();
 
             try
             {
-                Console.Write("Enter source file path (e.g. c:\\source\\my_large_file.bin): ");
-                string sourceFilePath = Console.ReadLine();
+                logger.LogInformation("Starting file transfer application...");
+
+                string sourceFilePath = userInputService.GetSourceFilePath();
 
                 if (!File.Exists(sourceFilePath))
                 {
-                    Console.WriteLine("Error: Source file does not exist.");
+                    logger.LogError("Source file does not exist: {SourceFilePath}", sourceFilePath);
                     return;
                 }
 
-                Console.Write("Enter destination folder path (e.g. d:\\destination\\): ");
-                string destinationFolderPath = Console.ReadLine();
+                string destinationFolderPath = userInputService.GetDestinationFolder();
 
                 if (!Directory.Exists(destinationFolderPath))
                 {
-                    Console.WriteLine("Error: Destination folder does not exist.");
+                    logger.LogError("Destination folder does not exist: {DestinationFolderPath}", destinationFolderPath);
                     return;
                 }
 
@@ -47,13 +55,12 @@ namespace FileTransferApp
                 string destinationFilePath = Path.Combine(destinationFolderPath, fileName);
 
                 await transferManager.StartTransferAsync(sourceFilePath, destinationFilePath);
-               
+                logger.LogInformation("File transfer completed successfully.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error occurred: {ex.Message}");
+                logger.LogError(ex, "Error occurred during file transfer.");
             }
-
         }
     }
 }

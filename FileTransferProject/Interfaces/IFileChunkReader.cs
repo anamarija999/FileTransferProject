@@ -18,7 +18,7 @@ namespace FileTransferProject.Interfaces
         /// <param name="filePath">Path to the source file.</param>
         /// <param name="queue">Blocking collection to store the file chunks.</param>
         /// <param name="cancellationToken">Token to cancel the operation.</param>
-        Task ReadChunksAsync(string filePath, ChannelWriter<FileChunk> writer , CancellationToken cancellationToken = default);
+        Task ReadChunksAsync(string filePath, ChannelWriter<FileChunk> writer);
     }
 
 }

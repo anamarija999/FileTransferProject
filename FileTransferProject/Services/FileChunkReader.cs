@@ -18,7 +18,7 @@ namespace FileTransferProject.Services
             _hasher = hasher;
         }
 
-        public async Task ReadChunksAsync(string filePath, ChannelWriter<FileChunk> writer, CancellationToken cancellationToken = default)
+        public async Task ReadChunksAsync(string filePath, ChannelWriter<FileChunk> writer)
         {
             await using var fs = new FileStream(
                 filePath,
@@ -27,39 +27,44 @@ namespace FileTransferProject.Services
                 FileShare.Read,
                 BlockSize,
                 useAsync: true);
-
-            while (true)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                byte[] buffer = ArrayPool<byte>.Shared.Rent(BlockSize);
-                int bytesRead = 0;
-
-                try
+                while (true)
                 {
-                    bytesRead = await fs.ReadAsync(buffer, 0, BlockSize, cancellationToken);
-                    if (bytesRead == 0)
-                        break;
+                    byte[] buffer = ArrayPool<byte>.Shared.Rent(BlockSize);
+                    int bytesRead = 0;
 
-                    string md5 = _hasher.ComputeMd5(buffer.AsSpan(0, bytesRead).ToArray());
-
-                    var chunk = new FileChunk
+                    try
                     {
-                        Position = fs.Position - bytesRead,
-                        Data = buffer[..bytesRead],
-                        Length = bytesRead,
-                        Md5Hash = md5
-                    };
+                        bytesRead = await fs.ReadAsync(buffer, 0, BlockSize);
+                        if (bytesRead == 0)
+                            break;
 
-                    await writer.WriteAsync(chunk, cancellationToken);
+                        string md5 = _hasher.ComputeMd5(buffer.AsSpan(0, bytesRead).ToArray());
+
+                        var chunk = new FileChunk
+                        {
+                            Position = fs.Position - bytesRead,
+                            Data = buffer[..bytesRead],
+                            Length = bytesRead,
+                            Md5Hash = md5
+                        };
+
+                        await writer.WriteAsync(chunk);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(buffer);
+                    }
                 }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(buffer);
-                }
+
+                writer.Complete();
+            }
+            catch (OperationCanceledException ex)
+            {
+                writer.Complete(ex);
             }
 
-            writer.Complete();
         }
     }
 }

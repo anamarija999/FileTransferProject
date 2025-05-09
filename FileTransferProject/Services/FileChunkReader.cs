@@ -27,8 +27,7 @@ namespace FileTransferProject.Services
                 FileShare.Read,
                 BlockSize,
                 useAsync: true);
-            try
-            {
+
                 while (true)
                 {
                     byte[] buffer = ArrayPool<byte>.Shared.Rent(BlockSize);
@@ -57,13 +56,7 @@ namespace FileTransferProject.Services
                         ArrayPool<byte>.Shared.Return(buffer);
                     }
                 }
-
                 writer.Complete();
-            }
-            catch (OperationCanceledException ex)
-            {
-                writer.Complete(ex);
-            }
 
         }
     }
